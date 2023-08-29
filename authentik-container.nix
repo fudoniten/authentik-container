@@ -131,7 +131,7 @@ in {
             volumes =
               [ "${cfg.state-directory}/postgres:/var/lib/postgresql/data" ];
             healthcheck = {
-              test = [ "CMD" "pg_isready" "-U" "postgres" ];
+              test = [ "CMD" "pg_isready" "-U" "authentik" "-d" "authentik" ];
               start_period = "20s";
               interval = "30s";
               retries = 5;
