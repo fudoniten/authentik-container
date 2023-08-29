@@ -129,7 +129,7 @@ in {
               test = [ "CMD" "pg_isready" "-U" "postgres" ];
               start_period = "20s";
               interval = "30s";
-              retries = "5";
+              retries = 5;
               timeout = "3s";
             };
             user = mkUserMap cfg.uids.postgres;
@@ -144,7 +144,7 @@ in {
               test = [ "CMD" "redis-cli" "ping" ];
               start_period = "20s";
               interval = "30s";
-              retries = "5";
+              retries = 5;
               timeout = "3s";
             };
             user = mkUserMap cfg.uids.redis;
