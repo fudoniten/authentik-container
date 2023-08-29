@@ -20,6 +20,10 @@ let
     pkgs.lib.passwd.stablerandom-passwd-file "authentik-postgresql-passwd"
     config.instance.build-seed;
 
+  authentikSecretKeyFile =
+    pkgs.lib.passwd.stablerandom-passwd-file "authentik-secret-key"
+    config.instance.build-seed;
+
 in {
   options.services.authentikContainer = with types; {
     enable = mkEnableOption "Enable Authentik running in an Arion container.";
@@ -103,6 +107,7 @@ in {
           AUTHENTIK_POSTGRESQL__NAME = "authentik";
           AUTHENTIK_POSTGRESQL__USER = "authentik";
           AUTHENTIK_POSTGRESQL__PASSWORD = readFile postgresPasswdFile;
+          AUTHENTIK_SECRET_KEY = readFile authentikSecretKeyFile;
         };
         target-file = "/run/authentik/authentik.env";
       };
