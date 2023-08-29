@@ -144,7 +144,7 @@ in {
             image = cfg.images.redis;
             restart = "always";
             command = "--save 60 1 --loglevel warning";
-            volumes = [ "${cfg.state-directory}:/data" ];
+            volumes = [ "${cfg.state-directory}/redis:/data" ];
             healthcheck = {
               test = [ "CMD" "redis-cli" "ping" ];
               start_period = "20s";
