@@ -118,7 +118,7 @@ in {
       image = { ... }: {
         project.name = "authentik";
         services = {
-          postgres = {
+          postgres.service = {
             image = cfg.images.postgres;
             restart = "always";
             volumes =
@@ -133,7 +133,7 @@ in {
             user = mkUserMap cfg.uids.postgres;
             env_file = [ hostSecrets.authentikPostgresEnv.target-file ];
           };
-          redis = {
+          redis.service = {
             image = cfg.images.redis;
             restart = "always";
             command = "--save 60 1 --loglevel warning";
@@ -147,7 +147,7 @@ in {
             };
             user = mkUserMap cfg.uids.redis;
           };
-          server = {
+          server.service = {
             image = cfg.images.authentik;
             restart = "always";
             command = "server";
@@ -163,7 +163,7 @@ in {
             ];
             depends_on = [ "postgresql" "redis" ];
           };
-          worker = {
+          worker.service = {
             image = cfg.images.authentik;
             restart = "always";
             command = "worker";
