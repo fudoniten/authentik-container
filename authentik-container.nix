@@ -163,7 +163,7 @@ in {
               "${toString cfg.ports.http}:9000"
               "${toString cfg.ports.https}:9443"
             ];
-            depends_on = [ "postgresql" "redis" ];
+            depends_on = [ "postgres" "redis" ];
           };
           worker.service = {
             image = cfg.images.authentik;
@@ -176,7 +176,7 @@ in {
               "${cfg.state-directory}/templates:/templates"
             ];
             user = mkUserMap cfg.uids.authentik;
-            depends_on = [ "postgresql" "redis" ];
+            depends_on = [ "postgres" "redis" ];
           };
         };
       };
