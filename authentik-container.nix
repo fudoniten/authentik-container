@@ -4,7 +4,9 @@ with lib;
 let
   cfg = config.services.authentikContainer;
 
-  hostSecrets = config.fudo.secrets.host-secrets."${config.instance.hostname}";
+  hostname = config.instance.hostname;
+
+  hostSecrets = config.fudo.secrets.host-secrets."${hostname}";
 
   mkEnvFile = envVars:
     let
