@@ -14,6 +14,8 @@ let
         mapAttrsToList (var: val: ''${var}="${toString val}"'') envVars;
     in pkgs.writeText "envFile" (concatStringsSep "\n" envLines);
 
+  mkUserMap = uid: "${toString uid}:${toString uid}";
+
   postgresPasswdFile =
     pkgs.lib.passwd.stablerandom-passwd-file "authentik-postgresql-passwd"
     config.instance.build-seed;
