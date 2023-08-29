@@ -51,11 +51,11 @@ in {
         type = int;
         default = 721;
       };
-      authentik-postgres = mkOption {
+      postgres = mkOption {
         type = int;
         default = 722;
       };
-      authentik-redis = mkOption {
+      redis = mkOption {
         type = int;
         default = 723;
       };
@@ -86,12 +86,12 @@ in {
       authentik-postgres = {
         isSystemUser = true;
         group = "authentik";
-        uid = cfg.uids.authentik-postgres;
+        uid = cfg.uids.postgres;
       };
       authentik-redis = {
         isSystemUser = true;
         group = "authentik";
-        uid = cfg.uids.authentik-redis;
+        uid = cfg.uids.redis;
       };
     };
 
