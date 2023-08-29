@@ -33,6 +33,17 @@ in {
       redis = mkOption { type = str; };
     };
 
+    ports = {
+      http = mkOption {
+        type = port;
+        default = 5030;
+      };
+      https = mkOption {
+        type = port;
+        default = 5031;
+      };
+    };
+
     uids = {
       authentik = mkOption {
         type = int;
