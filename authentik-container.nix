@@ -1,10 +1,12 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, ... }@toplevel:
 
 with lib;
 let
   cfg = config.services.authentikContainer;
 
   hostname = config.instance.hostname;
+
+  domainName = config.fudo.hosts."${hostname}".domain;
 
   hostSecrets = config.fudo.secrets.host-secrets."${hostname}";
 
@@ -47,6 +49,27 @@ in {
       https = mkOption {
         type = port;
         default = 5031;
+      };
+    };
+
+    smtp = {
+      host = mkOption {
+        type = str;
+        default = "smtp.${domainName}";
+      };
+      port = mkOption {
+        type = port;
+        default = 587;
+      };
+      user = mkOption {
+        type = str;
+        default = "authentik";
+      };
+      password-file = mkOption { type = str; };
+      from-address = mkOption {
+        type = str;
+        default =
+          "${toplevel.config.services.authentikContainer.smtp.user}@${domainName}";
       };
     };
 
@@ -103,11 +126,21 @@ in {
       authentikEnv = {
         source-file = mkEnvFile {
           AUTHENTIK_REDIS__HOST = "redis";
+
           AUTHENTIK_POSTGRESQL__HOST = "postgres";
           AUTHENTIK_POSTGRESQL__NAME = "authentik";
           AUTHENTIK_POSTGRESQL__USER = "authentik";
           AUTHENTIK_POSTGRESQL__PASSWORD = readFile postgresPasswdFile;
+
           AUTHENTIK_SECRET_KEY = readFile authentikSecretKeyFile;
+
+          AUTHENTIK_EMAIL__HOST = cfg.smtp.host;
+          AUTHENTIK_EMAIL__PORT = toString cfg.smtp.port;
+          AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
+          AUTHENTIK_EMAIL__PASSWORD = readFile cfg.smtp.password-file;
+          AUTHENTIK_EMAIL__USE_TLS = true;
+          AUTHENTIK_EMAIL__TIMEOUT = 10;
+          AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
         };
         target-file = "/run/authentik/authentik.env";
       };
