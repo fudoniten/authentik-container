@@ -161,6 +161,7 @@ in {
           postgres.service = {
             image = cfg.images.postgres;
             restart = "always";
+            command = "-c 'max_connections=300'";
             volumes =
               [ "${cfg.state-directory}/postgres:/var/lib/postgresql/data" ];
             healthcheck = {
