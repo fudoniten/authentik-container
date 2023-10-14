@@ -99,8 +99,8 @@ in {
         "d ${cfg.state-directory}/certs     0700 authentik          root - -"
       ];
       services.arion-authentik = {
-        after = [ "network-online.target" ];
-        requires = [ "network-online.target" ];
+        after = [ "network-online.target" "podman.service" ];
+        requires = [ "network-online.target" "podman.service" ];
       };
     };
 
