@@ -59,7 +59,7 @@ in {
       };
       port = mkOption {
         type = port;
-        default = 25;
+        default = 587;
       };
       user = mkOption {
         type = str;
@@ -139,8 +139,9 @@ in {
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
           AUTHENTIK_EMAIL__PASSWORD =
             removeSuffix "\n" (readFile cfg.smtp.password-file);
-          # TODO: THIS IS WRONG BUT MAYBE RIGHT FOR FRANCE?
-          AUTHENTIK_EMAIL__USE_SSL = true;
+          AUTHENTIK_EMAIL__USE_SSL = cfg.smtp.port == 465;
+          AUTHENTIK_EMAIL__USE_TLS = (cfg.smtp.port == 25)
+            || (cfg.smtp.port == 587);
           AUTHENTIK_EMAIL__TIMEOUT = 10;
           AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
         };
