@@ -59,7 +59,7 @@ in {
       };
       port = mkOption {
         type = port;
-        default = 587;
+        default = 25;
       };
       user = mkOption {
         type = str;
