@@ -69,7 +69,7 @@ in {
       from-address = mkOption {
         type = str;
         default =
-          "${toplevel.config.services.authentikContainer.smtp.user}@${domainName}";
+          "Fudo Authentication <${toplevel.config.services.authentikContainer.smtp.user}@${domainName}>";
       };
     };
 
