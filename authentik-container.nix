@@ -139,7 +139,8 @@ in {
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
           AUTHENTIK_EMAIL__PASSWORD =
             removeSuffix "\n" (readFile cfg.smtp.password-file);
-          AUTHENTIK_EMAIL__USE_TLS = true;
+          # TODO: THIS IS WRONG BUT MAYBE RIGHT FOR FRANCE?
+          AUTHENTIK_EMAIL__USE_SSL = true;
           AUTHENTIK_EMAIL__TIMEOUT = 10;
           AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
         };
