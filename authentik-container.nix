@@ -137,7 +137,8 @@ in {
           AUTHENTIK_EMAIL__HOST = cfg.smtp.host;
           AUTHENTIK_EMAIL__PORT = toString cfg.smtp.port;
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
-          AUTHENTIK_EMAIL__PASSWORD = readFile cfg.smtp.password-file;
+          AUTHENTIK_EMAIL__PASSWORD =
+            removeSuffix "\n" (readFile cfg.smtp.password-file);
           AUTHENTIK_EMAIL__USE_TLS = true;
           AUTHENTIK_EMAIL__TIMEOUT = 10;
           AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
