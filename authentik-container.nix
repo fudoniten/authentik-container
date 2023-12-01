@@ -139,9 +139,10 @@ in {
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
           AUTHENTIK_EMAIL__PASSWORD =
             removeSuffix "\n" (readFile cfg.smtp.password-file);
-          AUTHENTIK_EMAIL__USE_SSL = cfg.smtp.port == 465;
-          AUTHENTIK_EMAIL__USE_TLS = (cfg.smtp.port == 25)
-            || (cfg.smtp.port == 587);
+          AUTHENTIK_EMAIL__USE_SSL =
+            optionalString (cfg.smtp.port == 465) "TRUE";
+          AUTHENTIK_EMAIL__USE_TLS =
+            optionalString (cfg.smtp.port == 25 || cfg.smtp.port == 587) "TRUE";
           AUTHENTIK_EMAIL__TIMEOUT = 10;
           AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
         };
