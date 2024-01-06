@@ -104,22 +104,26 @@ in {
       };
     };
 
-    users.users = {
-      authentik = {
-        isSystemUser = true;
-        group = "authentik";
-        uid = cfg.uids.authentik;
+    users = {
+      users = {
+        authentik = {
+          isSystemUser = true;
+          group = "authentik";
+          uid = cfg.uids.authentik;
+        };
+        authentik-postgres = {
+          isSystemUser = true;
+          group = "authentik";
+          uid = cfg.uids.postgres;
+        };
+        authentik-redis = {
+          isSystemUser = true;
+          group = "authentik";
+          uid = cfg.uids.redis;
+        };
       };
-      authentik-postgres = {
-        isSystemUser = true;
-        group = "authentik";
-        uid = cfg.uids.postgres;
-      };
-      authentik-redis = {
-        isSystemUser = true;
-        group = "authentik";
-        uid = cfg.uids.redis;
-      };
+      groups.authentik.members =
+        [ "authentik" "authentik-postgres" "authentik-redis" ];
     };
 
     fudo.secrets.host-secrets."${hostname}" = {
