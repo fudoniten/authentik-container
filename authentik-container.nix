@@ -101,6 +101,10 @@ in {
       services.arion-authentik = {
         after = [ "network-online.target" "podman.service" ];
         requires = [ "network-online.target" "podman.service" ];
+        serviceConfig = {
+          Restart = "on-failure";
+          RestartSec = 120;
+        };
       };
     };
 
