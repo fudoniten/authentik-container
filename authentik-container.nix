@@ -142,6 +142,8 @@ in {
 
           AUTHENTIK_SECRET_KEY = readFile authentikSecretKeyFile;
 
+          AUTHENTIK_DEFAULT_USER_CHANGE_USERNAME = toString false;
+
           AUTHENTIK_EMAIL__HOST = cfg.smtp.host;
           AUTHENTIK_EMAIL__PORT = toString cfg.smtp.port;
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
