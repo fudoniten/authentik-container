@@ -73,6 +73,14 @@ in {
       };
     };
 
+    extraCerts = mkOption {
+      type = attrsOf (listOf str);
+      description = ''
+        Map of certificate name to a list of certificates to make available to the
+              Authentik server (i.e. the public and optionally private keys).'';
+      default = { };
+    };
+
     uids = {
       authentik = mkOption {
         type = int;
@@ -98,12 +106,27 @@ in {
         "d ${cfg.state-directory}/templates 0700 authentik          root - -"
         "d ${cfg.state-directory}/certs     0700 authentik          root - -"
       ];
-      services.arion-authentik = {
-        after = [ "network-online.target" "podman.service" ];
-        requires = [ "network-online.target" "podman.service" ];
-        serviceConfig = {
-          Restart = "on-failure";
-          RestartSec = 120;
+      services = {
+        authentik-cert-copy = {
+          wantedBy = [ "arion-authentik.service" ];
+          before = [ "arion-authentik.service" ];
+          script = let
+            copyCommands = concatLists (mapAttrsToList (_: certs:
+              concatMap (cert:
+                let target = "${cfg.state-directory}/certs/${baseNameOf cert}";
+                in ''
+                  cp ${cert} ${target}
+                  chown authentik:root ${target}
+                '') certs)) cfg.extraCerts;
+          in concatStringsSep "\n" copyCommands;
+        };
+        arion-authentik = {
+          after = [ "network-online.target" "podman.service" ];
+          requires = [ "network-online.target" "podman.service" ];
+          serviceConfig = {
+            Restart = "on-failure";
+            RestartSec = 120;
+          };
         };
       };
     };
