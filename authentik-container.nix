@@ -74,10 +74,8 @@ in {
     };
 
     extraCerts = mkOption {
-      type = attrsOf (listOf str);
-      description = ''
-        Map of certificate name to a list of certificates to make available to the
-              Authentik server (i.e. the public and optionally private keys).'';
+      type = attrsOf str;
+      description = "Map of certificate name to certificate location.";
       default = { };
     };
 
@@ -111,14 +109,14 @@ in {
           wantedBy = [ "arion-authentik.service" ];
           before = [ "arion-authentik.service" ];
           script = let
-            copyCommands = concatLists (mapAttrsToList (_: certs:
-              concatMap (cert:
-                let target = "${cfg.state-directory}/certs/${baseNameOf cert}";
-                in ''
-                  cp ${cert} ${target}
-                  chown authentik:root ${target}
-                '') certs)) cfg.extraCerts;
-          in concatStringsSep "\n" copyCommands;
+            mkCopyCommand = name: src:
+              let target = "${cfg.state-directory}/certs/${name}";
+              in ''
+                cp -v "${src}" "${target}"
+                chown authentik:root "${target}"
+              '';
+          in concatStringsSep "\n"
+          (mapAttrsToList mkCopyCommand cfg.extraCerts);
         };
         arion-authentik = {
           after = [ "network-online.target" "podman.service" ];
