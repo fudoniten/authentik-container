@@ -108,15 +108,19 @@ in {
         authentik-cert-copy = {
           wantedBy = [ "arion-authentik.service" ];
           before = [ "arion-authentik.service" ];
-          script = let
-            mkCopyCommand = name: src:
-              let target = "${cfg.state-directory}/certs/${name}";
-              in ''
-                cp -v "${src}" "${target}"
-                chown authentik:root "${target}"
-              '';
-          in concatStringsSep "\n"
-          (mapAttrsToList mkCopyCommand cfg.extraCerts);
+          serviceConfig = {
+            ExecStart = let
+              mkCopyCommand = name: src:
+                let target = "${cfg.state-directory}/certs/${name}";
+                in ''
+                  cp -v "${src}" "${target}"
+                  chown authentik:root "${target}"
+                '';
+            in pkgs.writeShellScript "authentik-copy-certs.sh"
+            (concatStringsSep "\n"
+              (mapAttrsToList mkCopyCommand cfg.extraCerts));
+            Type = "oneshot";
+          };
         };
         arion-authentik = {
           after = [ "network-online.target" "podman.service" ];
