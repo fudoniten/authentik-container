@@ -10,14 +10,21 @@ let
 
   hostSecrets = config.fudo.secrets.host-secrets."${hostname}";
 
+  # Creates an environment file from an attrset of environment variables
+  # Used to pass configuration to containers via env_file directive
   mkEnvFile = envVars:
     let
       envLines =
         mapAttrsToList (var: val: ''${var}="${toString val}"'') envVars;
     in pkgs.writeText "envFile" (concatStringsSep "\n" envLines);
 
+  # Creates a Docker user mapping string (uid:gid format)
+  # Maps the container's internal UID to the host UID for proper file permissions
   mkUserMap = uid: "${toString uid}:${toString uid}";
 
+  # Generate deterministic passwords using build-seed
+  # This ensures passwords remain consistent across NixOS rebuilds
+  # while still being unique per deployment (different hosts have different seeds)
   postgresPasswdFile =
     pkgs.lib.passwd.stablerandom-passwd-file "authentik-postgresql-passwd"
     config.instance.build-seed;
@@ -96,6 +103,30 @@ in {
   };
 
   config = mkIf cfg.enable {
+    # Input validation
+    assertions = [
+      {
+        assertion = cfg.state-directory != "";
+        message = "services.authentikContainer.state-directory must be set";
+      }
+      {
+        assertion = cfg.images.authentik != "";
+        message = "services.authentikContainer.images.authentik must be set";
+      }
+      {
+        assertion = cfg.images.postgres != "";
+        message = "services.authentikContainer.images.postgres must be set";
+      }
+      {
+        assertion = cfg.images.redis != "";
+        message = "services.authentikContainer.images.redis must be set";
+      }
+      {
+        assertion = cfg.smtp.password-file != "";
+        message = "services.authentikContainer.smtp.password-file must be set";
+      }
+    ];
+
     systemd = {
       tmpfiles.rules = [
         "d ${cfg.state-directory}/postgres  0700 authentik-postgres root - -"
@@ -105,7 +136,8 @@ in {
         "d ${cfg.state-directory}/certs     0700 authentik          root - -"
       ];
       services = {
-        authentik-cert-copy = {
+        # Only create cert-copy service if there are actually certs to copy
+        authentik-cert-copy = mkIf (cfg.extraCerts != { }) {
           wantedBy = [ "arion-authentik.service" ];
           before = [ "arion-authentik.service" ];
           serviceConfig = {
@@ -155,6 +187,8 @@ in {
         [ "authentik" "authentik-postgres" "authentik-redis" ];
     };
 
+    # Generate environment files for containers
+    # These are placed in /run/authentik/ and passed to containers via env_file
     fudo.secrets.host-secrets."${hostname}" = {
       authentikEnv = {
         source-file = mkEnvFile {
@@ -174,6 +208,8 @@ in {
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
           AUTHENTIK_EMAIL__PASSWORD =
             removeSuffix "\n" (readFile cfg.smtp.password-file);
+          # Infer SSL/TLS based on port: 465=SSL, 25/587=TLS
+          # This is a simplification; override if your SMTP server differs
           AUTHENTIK_EMAIL__USE_SSL =
             optionalString (cfg.smtp.port == 465) "TRUE";
           AUTHENTIK_EMAIL__USE_TLS =
@@ -193,6 +229,8 @@ in {
       };
     };
 
+    # Arion configuration - defines the Docker Compose-like container setup
+    # Containers communicate via internal Docker network (postgres, redis hostnames)
     virtualisation.arion.projects.authentik.settings = let
       image = { ... }: {
         project.name = "authentik";
@@ -200,7 +238,7 @@ in {
           postgres.service = {
             image = cfg.images.postgres;
             restart = "always";
-            command = "-c 'max_connections=300'";
+            command = "-c max_connections=300";
             volumes =
               [ "${cfg.state-directory}/postgres:/var/lib/postgresql/data" ];
             healthcheck = {
