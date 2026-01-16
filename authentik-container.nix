@@ -78,6 +78,17 @@ in {
         default =
           "Fudo Authentication <${toplevel.config.services.authentikContainer.smtp.user}@${domainName}>";
       };
+      use-ssl = mkOption {
+        type = bool;
+        default = (toplevel.config.services.authentikContainer.smtp.port == 465);
+        description = "Use SSL for SMTP connection (typically port 465)";
+      };
+      use-tls = mkOption {
+        type = bool;
+        default = let port = toplevel.config.services.authentikContainer.smtp.port;
+                  in (port == 25 || port == 587);
+        description = "Use TLS/STARTTLS for SMTP connection (typically port 25 or 587)";
+      };
     };
 
     extraCerts = mkOption {
@@ -98,6 +109,51 @@ in {
       redis = mkOption {
         type = int;
         default = 723;
+      };
+    };
+
+    resources = {
+      postgres = {
+        cpus = mkOption {
+          type = nullOr str;
+          default = null;
+          description = "CPU limit for PostgreSQL (e.g., '2.0' for 2 CPUs)";
+          example = "2.0";
+        };
+        memory = mkOption {
+          type = nullOr str;
+          default = null;
+          description = "Memory limit for PostgreSQL (e.g., '2G')";
+          example = "2G";
+        };
+      };
+      redis = {
+        cpus = mkOption {
+          type = nullOr str;
+          default = null;
+          description = "CPU limit for Redis (e.g., '1.0' for 1 CPU)";
+          example = "1.0";
+        };
+        memory = mkOption {
+          type = nullOr str;
+          default = null;
+          description = "Memory limit for Redis (e.g., '512M')";
+          example = "512M";
+        };
+      };
+      authentik = {
+        cpus = mkOption {
+          type = nullOr str;
+          default = null;
+          description = "CPU limit for Authentik server and worker (e.g., '2.0' for 2 CPUs)";
+          example = "2.0";
+        };
+        memory = mkOption {
+          type = nullOr str;
+          default = null;
+          description = "Memory limit for Authentik server and worker (e.g., '1G')";
+          example = "1G";
+        };
       };
     };
   };
@@ -125,7 +181,25 @@ in {
         assertion = cfg.smtp.password-file != "";
         message = "services.authentikContainer.smtp.password-file must be set";
       }
-    ];
+      # Port conflict detection
+      {
+        assertion = cfg.ports.http >= 1024;
+        message = "services.authentikContainer.ports.http must be >= 1024 (unprivileged port)";
+      }
+      {
+        assertion = cfg.ports.https >= 1024;
+        message = "services.authentikContainer.ports.https must be >= 1024 (unprivileged port)";
+      }
+      {
+        assertion = cfg.ports.http != cfg.ports.https;
+        message = "services.authentikContainer.ports.http and ports.https must be different";
+      }
+    ] ++
+    # Certificate source validation
+    (mapAttrsToList (name: src: {
+      assertion = builtins.pathExists src;
+      message = "Certificate source '${src}' for '${name}' does not exist";
+    }) cfg.extraCerts);
 
     systemd = {
       tmpfiles.rules = [
@@ -208,12 +282,9 @@ in {
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
           AUTHENTIK_EMAIL__PASSWORD =
             removeSuffix "\n" (readFile cfg.smtp.password-file);
-          # Infer SSL/TLS based on port: 465=SSL, 25/587=TLS
-          # This is a simplification; override if your SMTP server differs
-          AUTHENTIK_EMAIL__USE_SSL =
-            optionalString (cfg.smtp.port == 465) "TRUE";
-          AUTHENTIK_EMAIL__USE_TLS =
-            optionalString (cfg.smtp.port == 25 || cfg.smtp.port == 587) "TRUE";
+          # Use explicit SSL/TLS settings (can be overridden, defaults inferred from port)
+          AUTHENTIK_EMAIL__USE_SSL = optionalString cfg.smtp.use-ssl "TRUE";
+          AUTHENTIK_EMAIL__USE_TLS = optionalString cfg.smtp.use-tls "TRUE";
           AUTHENTIK_EMAIL__TIMEOUT = 10;
           AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
         };
@@ -250,6 +321,11 @@ in {
             };
             user = mkUserMap cfg.uids.postgres;
             env_file = [ hostSecrets.authentikPostgresEnv.target-file ];
+          } // optionalAttrs (cfg.resources.postgres.cpus != null || cfg.resources.postgres.memory != null) {
+            deploy.resources.limits = mkMerge [
+              (mkIf (cfg.resources.postgres.cpus != null) { cpus = cfg.resources.postgres.cpus; })
+              (mkIf (cfg.resources.postgres.memory != null) { memory = cfg.resources.postgres.memory; })
+            ];
           };
           redis.service = {
             image = cfg.images.redis;
@@ -264,6 +340,11 @@ in {
               timeout = "3s";
             };
             user = mkUserMap cfg.uids.redis;
+          } // optionalAttrs (cfg.resources.redis.cpus != null || cfg.resources.redis.memory != null) {
+            deploy.resources.limits = mkMerge [
+              (mkIf (cfg.resources.redis.cpus != null) { cpus = cfg.resources.redis.cpus; })
+              (mkIf (cfg.resources.redis.memory != null) { memory = cfg.resources.redis.memory; })
+            ];
           };
           server.service = {
             image = cfg.images.authentik;
@@ -280,6 +361,11 @@ in {
               "${toString cfg.ports.https}:9443"
             ];
             depends_on = [ "postgres" "redis" ];
+          } // optionalAttrs (cfg.resources.authentik.cpus != null || cfg.resources.authentik.memory != null) {
+            deploy.resources.limits = mkMerge [
+              (mkIf (cfg.resources.authentik.cpus != null) { cpus = cfg.resources.authentik.cpus; })
+              (mkIf (cfg.resources.authentik.memory != null) { memory = cfg.resources.authentik.memory; })
+            ];
           };
           worker.service = {
             image = cfg.images.authentik;
@@ -293,6 +379,11 @@ in {
             ];
             user = mkUserMap cfg.uids.authentik;
             depends_on = [ "postgres" "redis" ];
+          } // optionalAttrs (cfg.resources.authentik.cpus != null || cfg.resources.authentik.memory != null) {
+            deploy.resources.limits = mkMerge [
+              (mkIf (cfg.resources.authentik.cpus != null) { cpus = cfg.resources.authentik.cpus; })
+              (mkIf (cfg.resources.authentik.memory != null) { memory = cfg.resources.authentik.memory; })
+            ];
           };
         };
       };

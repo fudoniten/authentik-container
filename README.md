@@ -64,6 +64,9 @@ If you're using this as inspiration, you'll need to replace these with your own 
       user = "authentik";
       password-file = "/run/secrets/smtp-password";
       from-address = "Authentik <authentik@example.com>";
+      # Optional: Explicit SSL/TLS settings (defaults inferred from port)
+      use-ssl = false;  # true for port 465
+      use-tls = true;   # true for port 25 or 587
     };
 
     # Optional: Add custom CA certificates
@@ -76,6 +79,22 @@ If you're using this as inspiration, you'll need to replace these with your own 
       authentik = 721;
       postgres = 722;
       redis = 723;
+    };
+
+    # Optional: Resource limits to prevent containers from consuming all host resources
+    resources = {
+      postgres = {
+        cpus = "2.0";    # Limit to 2 CPUs
+        memory = "2G";   # Limit to 2GB RAM
+      };
+      redis = {
+        cpus = "1.0";    # Limit to 1 CPU
+        memory = "512M"; # Limit to 512MB RAM
+      };
+      authentik = {
+        cpus = "2.0";    # Limit to 2 CPUs (applies to both server and worker)
+        memory = "1G";   # Limit to 1GB RAM each
+      };
     };
   };
 }
@@ -132,8 +151,35 @@ If you're using this as inspiration, you'll need to replace these with your own 
 
 ## File Structure
 
-- **`flake.nix`**: Nix flake definition, imports nixpkgs and Arion
+- **`flake.nix`**: Nix flake definition, imports nixpkgs and Arion, includes syntax checks
 - **`authentik-container.nix`**: Main NixOS module with all configuration
+
+## Validation and Testing
+
+### Flake Checks
+
+The flake includes built-in checks to validate syntax before deployment:
+
+```bash
+# Run all checks
+nix flake check
+
+# This validates:
+# - Module syntax is correct
+# - Flake structure is valid
+# - No obvious configuration errors
+```
+
+### Configuration Validation
+
+The module includes built-in assertions that validate your configuration at build time:
+
+- **Required options**: Ensures all required options are set (state-directory, images, smtp.password-file)
+- **Port validation**: Checks that ports are >= 1024 (unprivileged) and don't conflict
+- **Certificate validation**: Verifies that certificate source files exist before trying to copy them
+- **Resource limits**: Validates CPU/memory limit format if specified
+
+If any validation fails, `nixos-rebuild` will fail with a clear error message explaining what needs to be fixed.
 
 ## Configuration Options
 
@@ -153,16 +199,28 @@ If you're using this as inspiration, you'll need to replace these with your own 
 - `smtp.port` (default: 587): SMTP server port
 - `smtp.user` (default: "authentik"): SMTP username
 - `smtp.from-address`: Email sender address
+- `smtp.use-ssl` (default: inferred from port): Use SSL for SMTP (typically port 465)
+- `smtp.use-tls` (default: inferred from port): Use TLS/STARTTLS for SMTP (typically port 25/587)
 - `extraCerts` (default: {}): Map of certificate name → file path
 - `uids.*`: Custom UIDs for service users
+- `resources.postgres.{cpus,memory}`: CPU and memory limits for PostgreSQL
+- `resources.redis.{cpus,memory}`: CPU and memory limits for Redis
+- `resources.authentik.{cpus,memory}`: CPU and memory limits for Authentik server and worker
 
 ## Email Configuration
 
-SMTP settings are inferred from the port number:
-- **Port 465**: Uses SSL (`AUTHENTIK_EMAIL__USE_SSL = TRUE`)
-- **Port 25 or 587**: Uses TLS (`AUTHENTIK_EMAIL__USE_TLS = TRUE`)
+By default, SMTP SSL/TLS settings are inferred from the port number:
+- **Port 465**: `use-ssl = true` (SSL)
+- **Port 25 or 587**: `use-tls = true` (TLS/STARTTLS)
 
-If you need different settings, you'll need to modify the module.
+You can explicitly override these settings if your SMTP server uses non-standard ports:
+```nix
+smtp = {
+  port = 2525;  # Non-standard port
+  use-ssl = false;
+  use-tls = true;
+};
+```
 
 ## Accessing Authentik
 
@@ -244,12 +302,90 @@ tar czf authentik-backup-$(date +%Y%m%d).tar.gz \
 3. Arion will pull new images and recreate containers
 
 ### PostgreSQL Major Versions
-PostgreSQL major version upgrades require manual intervention:
-1. Backup database
-2. Stop Authentik
-3. Use `pg_upgrade` or dump/restore
-4. Update `images.postgres`
-5. Start Authentik
+
+PostgreSQL major version upgrades (e.g., 15 → 16) require manual intervention because the data directory format changes between major versions. Here's the detailed process:
+
+#### Option 1: Using pg_dumpall (Recommended - Safest)
+
+This method exports the entire database to SQL and imports it into the new version.
+
+```bash
+# 1. Backup your data first!
+tar czf authentik-backup-$(date +%Y%m%d).tar.gz /var/lib/authentik/
+
+# 2. Export the database while the old version is still running
+podman exec authentik-postgres-1 pg_dumpall -U authentik > authentik-db-backup.sql
+
+# 3. Stop Authentik services
+systemctl stop arion-authentik.service
+
+# 4. Backup the old PostgreSQL data directory and clear it
+mv /var/lib/authentik/postgres /var/lib/authentik/postgres.old
+mkdir -p /var/lib/authentik/postgres
+chown authentik-postgres:authentik /var/lib/authentik/postgres
+chmod 0700 /var/lib/authentik/postgres
+
+# 5. Update your NixOS configuration with new PostgreSQL image
+# Change: images.postgres = "docker.io/library/postgres:16-alpine";
+# To:     images.postgres = "docker.io/library/postgres:17-alpine";
+
+# 6. Rebuild NixOS configuration (pulls new image and recreates containers)
+nixos-rebuild switch
+
+# 7. Wait for PostgreSQL to initialize (check logs)
+journalctl -u arion-authentik.service -f
+# Wait until you see "database system is ready to accept connections"
+
+# 8. Import the database backup
+cat authentik-db-backup.sql | podman exec -i authentik-postgres-1 psql -U authentik
+
+# 9. Verify the import worked
+podman exec authentik-postgres-1 psql -U authentik -d authentik -c "\dt"
+
+# 10. If everything works, you can delete the old data directory
+rm -rf /var/lib/authentik/postgres.old
+```
+
+#### Option 2: Using pg_upgrade (Faster, More Complex)
+
+This method upgrades the data directory in-place, which is faster but more complex.
+
+```bash
+# 1. Backup your data first!
+tar czf authentik-backup-$(date +%Y%m%d).tar.gz /var/lib/authentik/
+
+# 2. Stop Authentik services
+systemctl stop arion-authentik.service
+
+# 3. Prepare directories
+mkdir -p /var/lib/authentik/postgres-new
+chown authentik-postgres:authentik /var/lib/authentik/postgres-new
+chmod 0700 /var/lib/authentik/postgres-new
+
+# 4. Run pg_upgrade using both old and new PostgreSQL versions
+# This is complex and requires running both versions simultaneously
+# See: https://www.postgresql.org/docs/current/pgupgrade.html
+
+# Note: This method is more error-prone for containerized setups.
+# The pg_dumpall method (Option 1) is recommended unless you have
+# a very large database where downtime is critical.
+```
+
+#### Troubleshooting PostgreSQL Upgrades
+
+**Database won't start after upgrade:**
+- Check logs: `journalctl -u arion-authentik.service -f`
+- Verify data directory ownership: `ls -la /var/lib/authentik/postgres`
+- Try restoring from your pre-upgrade backup
+
+**Import fails with "role does not exist":**
+- The dump includes role creation, this is normal
+- Check that the import completed despite warnings
+
+**Authentik can't connect after upgrade:**
+- Verify PostgreSQL is accepting connections: `podman exec authentik-postgres-1 pg_isready`
+- Check Authentik logs: `podman logs authentik-server-1`
+- Restart Authentik containers: `systemctl restart arion-authentik.service`
 
 ## Technical Details
 
@@ -267,23 +403,37 @@ Containers communicate via Docker Compose networking:
 - Ports 9000 (HTTP) and 9443 (HTTPS) exposed to host
 
 ### Resource Limits
-No CPU/memory limits configured by default. Add them if needed:
+Resource limits can be configured to prevent containers from consuming all host resources. By default, no limits are set. Configure them using the `resources` option:
+
 ```nix
-# In authentik-container.nix, modify service definitions:
-postgres.service.deploy.resources.limits = {
-  cpus = "2.0";
-  memory = "2G";
+services.authentikContainer.resources = {
+  postgres = {
+    cpus = "2.0";    # Limit PostgreSQL to 2 CPUs
+    memory = "2G";   # Limit PostgreSQL to 2GB RAM
+  };
+  redis = {
+    cpus = "1.0";    # Limit Redis to 1 CPU
+    memory = "512M"; # Limit Redis to 512MB RAM
+  };
+  authentik = {
+    cpus = "2.0";    # Limit Authentik to 2 CPUs (per container)
+    memory = "1G";   # Limit Authentik to 1GB RAM (per container)
+  };
 };
 ```
 
+The `authentik` resource limits apply to both the server and worker containers independently (each gets the specified limits).
+
 ## Future Improvements
 
-Potential enhancements (not implemented):
-- [ ] Explicit SSL/TLS options instead of port-based inference
-- [ ] Resource limits configuration
+Potential enhancements:
+- [x] Explicit SSL/TLS options instead of port-based inference
+- [x] Resource limits configuration
+- [x] Input validation and better error messages
+- [x] Flake checks for syntax validation
 - [ ] Backup automation
 - [ ] Prometheus metrics export
-- [ ] Container image version pinning
+- [ ] Container image digest pinning (instead of tags)
 - [ ] Network isolation options
 
 ## License
