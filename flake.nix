@@ -2,7 +2,7 @@
   description = "Authentik running in a container";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-23.05";
+    nixpkgs.url = "nixpkgs/nixos-26.05";
     arion.url = "github:hercules-ci/arion";
   };
 
