@@ -52,6 +52,19 @@ in {
       };
     };
 
+    listenAddress = mkOption {
+      type = str;
+      default = "0.0.0.0";
+      description = ''
+        Address the authentik server and worker bind to inside their
+        containers. Authentik >= 2026.5 defaults to binding "[::]", which
+        fails to start on hosts with IPv6 disabled; this pins it back to the
+        previous IPv4 default. Must remain reachable from the container's
+        published-port path (i.e. not "127.0.0.1"), since the host reaches
+        the container via its container-network interface, not loopback.
+      '';
+    };
+
     smtp = {
       host = mkOption {
         type = str;
@@ -169,6 +182,10 @@ in {
 
           AUTHENTIK_DEFAULT_USER_CHANGE_USERNAME = toString false;
 
+          AUTHENTIK_LISTEN__HTTP = "${cfg.listenAddress}:9000";
+          AUTHENTIK_LISTEN__HTTPS = "${cfg.listenAddress}:9443";
+          AUTHENTIK_LISTEN__METRICS = "${cfg.listenAddress}:9300";
+
           AUTHENTIK_EMAIL__HOST = cfg.smtp.host;
           AUTHENTIK_EMAIL__PORT = toString cfg.smtp.port;
           AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
@@ -241,7 +258,17 @@ in {
               "${toString cfg.ports.http}:9000"
               "${toString cfg.ports.https}:9443"
             ];
-            depends_on = [ "postgres" "redis" ];
+            healthcheck = {
+              test = [ "CMD" "ak" "healthcheck" ];
+              start_period = "60s";
+              interval = "30s";
+              retries = 5;
+              timeout = "3s";
+            };
+            depends_on = {
+              postgres.condition = "service_healthy";
+              redis.condition = "service_healthy";
+            };
           };
           worker.service = {
             image = cfg.images.authentik;
@@ -254,7 +281,17 @@ in {
               "${cfg.state-directory}/templates:/templates"
             ];
             user = mkUserMap cfg.uids.authentik;
-            depends_on = [ "postgres" "redis" ];
+            healthcheck = {
+              test = [ "CMD" "ak" "healthcheck" ];
+              start_period = "60s";
+              interval = "30s";
+              retries = 5;
+              timeout = "3s";
+            };
+            depends_on = {
+              postgres.condition = "service_healthy";
+              redis.condition = "service_healthy";
+            };
           };
         };
       };
