@@ -8,14 +8,6 @@ let
 
   domainName = config.fudo.hosts."${hostname}".domain;
 
-  hostSecrets = config.fudo.secrets.host-secrets."${hostname}";
-
-  mkEnvFile = envVars:
-    let
-      envLines =
-        mapAttrsToList (var: val: ''${var}="${toString val}"'') envVars;
-    in pkgs.writeText "envFile" (concatStringsSep "\n" envLines);
-
   mkUserMap = uid: "${toString uid}:${toString uid}";
 
   postgresPasswdFile =
@@ -25,6 +17,65 @@ let
   authentikSecretKeyFile =
     pkgs.lib.passwd.stablerandom-passwd-file "authentik-secret-key"
     config.instance.build-seed;
+
+  # Runtime paths for the two env files below, shared between the assembly
+  # script and the arion container `env_file` entries that read them.
+  authentikEnvPath = "/run/authentik/authentik.env";
+  authentikPostgresEnvPath = "/run/authentik/postgres.env";
+
+  # These used to be built with `pkgs.writeText` + `readFile` of
+  # postgresPasswdFile/authentikSecretKeyFile/cfg.smtp.password-file, which
+  # resolves every secret at EVAL TIME -- baking the Postgres password and
+  # Authentik's own signing/encryption secret key into the world-readable
+  # Nix store as plaintext, and, for cfg.smtp.password-file specifically,
+  # failing evaluation outright once that option points at a runtime
+  # secrets store (Aegis) whose path only exists after boot. Assembling
+  # both env files here instead, from the actual runtime paths, fixes both:
+  # nothing secret touches the store, and a path that doesn't exist until
+  # boot is no longer read before boot.
+  assembleAuthentikSecrets = pkgs.writeShellScript "authentik-secrets-assembly" ''
+    set -euo pipefail
+    umask 077
+
+    POSTGRES_PW="$(cat ${escapeShellArg postgresPasswdFile})"
+    SECRET_KEY="$(cat ${escapeShellArg authentikSecretKeyFile})"
+    SMTP_PW="$(cat ${escapeShellArg cfg.smtp.password-file})"
+
+    install -d -m 0755 "$(dirname ${escapeShellArg authentikEnvPath})"
+
+    # World-readable to match the containers' expectations: they run as
+    # in-container UIDs with no fixed relationship to the host.
+    cat > ${escapeShellArg authentikEnvPath} <<EOF
+    AUTHENTIK_REDIS__HOST="redis"
+    AUTHENTIK_POSTGRESQL__HOST="postgres"
+    AUTHENTIK_POSTGRESQL__NAME="authentik"
+    AUTHENTIK_POSTGRESQL__USER="authentik"
+    AUTHENTIK_POSTGRESQL__PASSWORD="$POSTGRES_PW"
+    AUTHENTIK_SECRET_KEY="$SECRET_KEY"
+    AUTHENTIK_DEFAULT_USER_CHANGE_USERNAME="false"
+    AUTHENTIK_LISTEN__HTTP="${cfg.listenAddress}:9000"
+    AUTHENTIK_LISTEN__HTTPS="${cfg.listenAddress}:9443"
+    AUTHENTIK_LISTEN__METRICS="${cfg.listenAddress}:9300"
+    AUTHENTIK_EMAIL__HOST="${cfg.smtp.host}"
+    AUTHENTIK_EMAIL__PORT="${toString cfg.smtp.port}"
+    AUTHENTIK_EMAIL__USERNAME="${cfg.smtp.user}"
+    AUTHENTIK_EMAIL__PASSWORD="$SMTP_PW"
+    AUTHENTIK_EMAIL__USE_SSL="${optionalString (cfg.smtp.port == 465) "TRUE"}"
+    AUTHENTIK_EMAIL__USE_TLS="${
+      optionalString (cfg.smtp.port == 25 || cfg.smtp.port == 587) "TRUE"
+    }"
+    AUTHENTIK_EMAIL__TIMEOUT="10"
+    AUTHENTIK_EMAIL__FROM="${cfg.smtp.from-address}"
+    EOF
+    chmod 0644 ${escapeShellArg authentikEnvPath}
+
+    cat > ${escapeShellArg authentikPostgresEnvPath} <<EOF
+    POSTGRES_DB="authentik"
+    POSTGRES_USER="authentik"
+    POSTGRES_PASSWORD="$POSTGRES_PW"
+    EOF
+    chmod 0644 ${escapeShellArg authentikPostgresEnvPath}
+  '';
 
 in {
   options.services.authentikContainer = with types; {
@@ -143,6 +194,18 @@ in {
             RestartSec = 120;
           };
         };
+        authentik-secrets = {
+          description = "Assemble Authentik's composed runtime secrets.";
+          wantedBy = [ "multi-user.target" ];
+          before = [ "arion-authentik.service" ];
+          requiredBy = [ "arion-authentik.service" ];
+          after = [ "aegis-secrets.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = assembleAuthentikSecrets;
+          };
+        };
       };
     };
 
@@ -168,48 +231,6 @@ in {
         [ "authentik" "authentik-postgres" "authentik-redis" ];
     };
 
-    fudo.secrets.host-secrets."${hostname}" = {
-      authentikEnv = {
-        source-file = mkEnvFile {
-          AUTHENTIK_REDIS__HOST = "redis";
-
-          AUTHENTIK_POSTGRESQL__HOST = "postgres";
-          AUTHENTIK_POSTGRESQL__NAME = "authentik";
-          AUTHENTIK_POSTGRESQL__USER = "authentik";
-          AUTHENTIK_POSTGRESQL__PASSWORD = readFile postgresPasswdFile;
-
-          AUTHENTIK_SECRET_KEY = readFile authentikSecretKeyFile;
-
-          AUTHENTIK_DEFAULT_USER_CHANGE_USERNAME = toString false;
-
-          AUTHENTIK_LISTEN__HTTP = "${cfg.listenAddress}:9000";
-          AUTHENTIK_LISTEN__HTTPS = "${cfg.listenAddress}:9443";
-          AUTHENTIK_LISTEN__METRICS = "${cfg.listenAddress}:9300";
-
-          AUTHENTIK_EMAIL__HOST = cfg.smtp.host;
-          AUTHENTIK_EMAIL__PORT = toString cfg.smtp.port;
-          AUTHENTIK_EMAIL__USERNAME = cfg.smtp.user;
-          AUTHENTIK_EMAIL__PASSWORD =
-            removeSuffix "\n" (readFile cfg.smtp.password-file);
-          AUTHENTIK_EMAIL__USE_SSL =
-            optionalString (cfg.smtp.port == 465) "TRUE";
-          AUTHENTIK_EMAIL__USE_TLS =
-            optionalString (cfg.smtp.port == 25 || cfg.smtp.port == 587) "TRUE";
-          AUTHENTIK_EMAIL__TIMEOUT = 10;
-          AUTHENTIK_EMAIL__FROM = cfg.smtp.from-address;
-        };
-        target-file = "/run/authentik/authentik.env";
-      };
-      authentikPostgresEnv = {
-        source-file = mkEnvFile {
-          POSTGRES_DB = "authentik";
-          POSTGRES_USER = "authentik";
-          POSTGRES_PASSWORD = readFile postgresPasswdFile;
-        };
-        target-file = "/run/authentik/postgres.env";
-      };
-    };
-
     virtualisation.arion.projects.authentik.settings = let
       image = { ... }: {
         project.name = "authentik";
@@ -228,7 +249,7 @@ in {
               timeout = "3s";
             };
             user = mkUserMap cfg.uids.postgres;
-            env_file = [ hostSecrets.authentikPostgresEnv.target-file ];
+            env_file = [ authentikPostgresEnvPath ];
           };
           redis.service = {
             image = cfg.images.redis;
@@ -248,7 +269,7 @@ in {
             image = cfg.images.authentik;
             restart = "always";
             command = "server";
-            env_file = [ hostSecrets.authentikEnv.target-file ];
+            env_file = [ authentikEnvPath ];
             volumes = [
               "${cfg.state-directory}/media:/media"
               "${cfg.state-directory}/templates:/templates"
@@ -274,7 +295,7 @@ in {
             image = cfg.images.authentik;
             restart = "always";
             command = "worker";
-            env_file = [ hostSecrets.authentikEnv.target-file ];
+            env_file = [ authentikEnvPath ];
             volumes = [
               "${cfg.state-directory}/media:/media"
               "${cfg.state-directory}/certs:/certs"
