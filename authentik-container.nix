@@ -10,13 +10,12 @@ let
 
   mkUserMap = uid: "${toString uid}:${toString uid}";
 
-  postgresPasswdFile =
-    pkgs.lib.passwd.stablerandom-passwd-file "authentik-postgresql-passwd"
-    config.instance.build-seed;
-
-  authentikSecretKeyFile =
-    pkgs.lib.passwd.stablerandom-passwd-file "authentik-secret-key"
-    config.instance.build-seed;
+  # Runtime paths (e.g. Aegis targets), read at boot by the assembly script
+  # below. These used to be derived from `instance.build-seed`, which put
+  # both values in the Nix store; they have no default now, so a host that
+  # enables the container has to say where they come from.
+  postgresPasswdFile = cfg.postgres-password-file;
+  authentikSecretKeyFile = cfg.secret-key-file;
 
   # Runtime paths for the two env files below, shared between the assembly
   # script and the arion container `env_file` entries that read them.
@@ -101,6 +100,24 @@ in {
         type = port;
         default = 5031;
       };
+    };
+
+    postgres-password-file = mkOption {
+      type = str;
+      description = ''
+        Runtime path of the password Authentik uses for its Postgres
+        database. Read at boot, so it may be a path that only exists after
+        a secrets manager has run. Must match the password the existing
+        database was initialized with.
+      '';
+    };
+
+    secret-key-file = mkOption {
+      type = str;
+      description = ''
+        Runtime path of AUTHENTIK_SECRET_KEY. Read at boot. Changing the
+        value invalidates sessions and anything Authentik has signed.
+      '';
     };
 
     listenAddress = mkOption {
