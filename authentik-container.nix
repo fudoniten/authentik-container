@@ -293,8 +293,8 @@ in {
             ];
             user = mkUserMap cfg.uids.authentik;
             ports = [
-              "${toString cfg.ports.http}:9000"
-              "${toString cfg.ports.https}:9443"
+              "127.0.0.1:${toString cfg.ports.http}:9000"
+              "127.0.0.1:${toString cfg.ports.https}:9443"
             ];
             healthcheck = {
               test = [ "CMD" "ak" "healthcheck" ];
