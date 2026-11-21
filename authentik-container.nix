@@ -204,8 +204,15 @@ in {
           };
         };
         arion-authentik = {
+          ## Order on podman.service, do NOT require it. NixOS's podman
+          ## service is the socket-activated API daemon, and it EXITS
+          ## after a few seconds idle. `Requires` couples lifecycles: the
+          ## idle exit stops every arion unit that requires it, and at
+          ## boot the exit cancels their start jobs entirely — leaving
+          ## authentik dead after every reboot with no error anywhere
+          ## (observed on tribune 2026-11-21). Socket activation brings
+          ## the API back on demand, so ordering alone is enough.
           after = [ "network-online.target" "podman.service" ];
-          requires = [ "network-online.target" "podman.service" ];
           serviceConfig = {
             Restart = "on-failure";
             RestartSec = 120;
